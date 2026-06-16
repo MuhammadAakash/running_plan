@@ -74,9 +74,11 @@ function analyzeFeedback(run, mins, secs, avgPaceMin, avgPaceSec) {
 // ─── Run Modal ───────────────────────────────────────────────────
 function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFeedback }) {
   const zone = PACE_ZONES[run.type];
-  const detail = getRunDetail(run, weekNum);
   const isRaceDay = run.title.includes("MARATHON DAY");
   const isRest = run.type === "rest";
+
+  const [mode, setMode] = useState('outdoor'); // 'outdoor' | 'treadmill'
+  const detail = getRunDetail(run, weekNum, mode);
 
   const [showFeedback, setShowFeedback] = useState(false);
   const [mins, setMins] = useState(feedback?.mins || '');
@@ -144,9 +146,23 @@ function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFee
               {run.distance > 0 && (
                 <div style={{ display:'flex', gap:18, marginTop:10, flexWrap:'wrap' }}>
                   <Stat val={`${run.distance} km`} label="distance" color={zone.color} />
-                  <Stat val={zone.paceRange} label="target pace" />
+                  <Stat val={mode === 'treadmill' ? zone.treadmillSpeed : zone.paceRange} label={mode === 'treadmill' ? 'treadmill speed' : 'target pace'} />
                   <Stat val={zone.effort} label="effort" />
                   <Stat val={zone.heartRate} label="HR zone" />
+                </div>
+              )}
+              {/* Outdoor / Treadmill toggle */}
+              {!isRest && (
+                <div style={{ display:'flex', gap:6, marginTop:14 }}>
+                  {[['outdoor','🏃 Outdoor'],['treadmill','🎢 Treadmill']].map(([m, label]) => (
+                    <button key={m} onClick={() => setMode(m)} style={{
+                      padding:'6px 14px', borderRadius:8,
+                      border:`1px solid ${mode===m ? zone.color : '#2A2A3C'}`,
+                      background: mode===m ? `${zone.color}22` : '#1A1A26',
+                      color: mode===m ? zone.color : '#6B7280',
+                      fontSize:12, fontWeight:700, cursor:'pointer', transition:'all .15s',
+                    }}>{label}</button>
+                  ))}
                 </div>
               )}
             </div>
