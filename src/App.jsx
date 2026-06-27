@@ -1,84 +1,68 @@
 import { useState, useEffect, useRef } from 'react';
-import { PLAN, PACE_ZONES, PHASE_COLORS, getRunDetail } from './planData.js';
+import { PLAN, PACE_ZONES, PHASE_COLORS, getRunDetail, getCycleDetail } from './planData.js';
 import { useLocalStorage } from './useLocalStorage.js';
 
 // ─── Feedback Analysis ───────────────────────────────────────────
 function analyzeFeedback(run, mins, secs, avgPaceMin, avgPaceSec) {
   const totalSecs = (mins * 60) + secs;
-  const expectedSecs = run.distance * 60 * 8; // baseline 8:00/km
   const avgPaceTotalSecs = (avgPaceMin * 60) + avgPaceSec;
-  const zone = PACE_ZONES[run.type];
-
+  const isCycle = ['cycle', 'cycle_hard', 'commute'].includes(run.type);
   let lines = [];
 
-  // Duration feedback
   if (run.distance > 0 && totalSecs > 0) {
-    const actualKmPace = totalSecs / run.distance; // secs per km
-    const minPer = Math.floor(actualKmPace / 60);
-    const secPer = Math.round(actualKmPace % 60);
-    lines.push(`Your overall pace was ~${minPer}:${String(secPer).padStart(2,'0')}/km for this run.`);
+    if (isCycle) {
+      const speedKmh = (run.distance / (totalSecs / 3600)).toFixed(1);
+      lines.push(`Your average speed was ~${speedKmh} km/h over ${run.distance}km.`);
+    } else {
+      const actualKmPace = totalSecs / run.distance;
+      lines.push(`Your overall pace was ~${Math.floor(actualKmPace/60)}:${String(Math.round(actualKmPace%60)).padStart(2,'0')}/km for this run.`);
+    }
   }
 
-  // Avg pace feedback per zone
+  if (isCycle) {
+    if (run.type === 'commute') {
+      lines.push("✅ Commute rides are brilliant training — getting fit while doing something you have to do anyway. 42km total in a commute day is serious aerobic volume.");
+      lines.push("🚴 Fuel properly at work after the morning ride — you've burned 400–500 calories before 9am.");
+    } else {
+      lines.push("✅ Every cycling session builds the same aerobic engine as running — with zero joint impact. The cardiovascular gains transfer directly to your marathon.");
+    }
+    lines.push("🏃 On commute days: don't add a run. 42km of cycling IS your training for that day.");
+    return lines;
+  }
+
   if (avgPaceTotalSecs > 0) {
     if (run.type === 'easy' || run.type === 'long') {
-      if (avgPaceTotalSecs < 390) { // faster than 6:30
-        lines.push("⚡ You ran this a bit fast for an easy/long run. Easy runs should feel conversational — try slowing down next time to stay in the aerobic zone.");
-      } else if (avgPaceTotalSecs <= 510) { // 6:30–8:30
-        lines.push("✅ Great pacing! You were right in the easy/long run zone. This is exactly the right effort to build your aerobic base.");
-      } else {
-        lines.push("🐢 You ran slower than target pace — that's completely fine for easy runs, especially on tired legs or in heat. Keep listening to your body.");
-      }
+      if (avgPaceTotalSecs < 390) lines.push("⚡ A bit fast for an easy/long run. With cycling in your week, keeping easy runs easy is especially important.");
+      else if (avgPaceTotalSecs <= 510) lines.push("✅ Great pacing! Right in the easy/long run zone. Exactly the right effort to build your aerobic base alongside your cycling.");
+      else lines.push("🐢 Slower than target — that's fine, especially carrying cycling fatigue. Keep listening to your body.");
     } else if (run.type === 'tempo') {
-      if (avgPaceTotalSecs < 345) { // faster than 5:45
-        lines.push("⚡ That's faster than your tempo target. While you finished strong, running tempo runs too fast can lead to injury. Aim for 6:00–6:30/km to get the best threshold adaptation.");
-      } else if (avgPaceTotalSecs <= 390) { // 5:45–6:30
-        lines.push("✅ Excellent tempo run! You hit the right effort zone. That comfortably hard feeling is your lactate threshold being pushed higher. Great work.");
-      } else {
-        lines.push("📈 Your pace was a little slower than the tempo target. That's okay — tempo pace is hard! Try to push slightly more next time. Even 5–10 seconds/km faster makes a difference.");
-      }
+      if (avgPaceTotalSecs < 345) lines.push("⚡ Faster than tempo target. Aim for 6:00–6:30/km for best threshold adaptation — especially with cycling load.");
+      else if (avgPaceTotalSecs <= 390) lines.push("✅ Excellent tempo run! Right effort zone. Your lactate threshold is being pushed higher with every session like this.");
+      else lines.push("📈 Slightly slower than tempo target — cycling fatigue is a factor. Push a little more next time.");
     } else if (run.type === 'interval') {
-      if (avgPaceTotalSecs < 315) { // faster than 5:15
-        lines.push("⚡ Very fast reps — make sure you're not burning out too early. Intervals should be hard but sustainable across all reps. Consistent splits beat fast-then-slow every time.");
-      } else if (avgPaceTotalSecs <= 390) { // 5:15–6:30
-        lines.push("✅ Solid interval session! You were in the right intensity zone. These reps are building the speed and fitness that will carry you through the marathon.");
-      } else {
-        lines.push("📈 Reps were a little slower than target. Try focusing on the first rep being controlled and building confidence — don't save yourself for a rep that never comes.");
-      }
+      if (avgPaceTotalSecs < 315) lines.push("⚡ Very fast reps — consistent splits beat fast-then-slow every time.");
+      else if (avgPaceTotalSecs <= 390) lines.push("✅ Solid interval session! Right intensity. These reps on top of cycling volume build exceptional aerobic capacity.");
+      else lines.push("📈 Reps slightly slower — your legs may carry cycling fatigue. Stay consistent.");
     }
   }
 
-  // Distance check
-  if (run.distance > 0 && totalSecs > 0) {
-    const impliedDist = totalSecs / (avgPaceTotalSecs || 1);
-    // just validate time makes sense
-    if (totalSecs < run.distance * 240) { // less than 4:00/km (impossible)
-      lines.push("⚠️ Those times look very fast — double-check your entries. Even elites run marathons at ~3:00/km!");
-    }
-  }
-
-  // Encouraging closer
-  if (run.type === 'long' && run.distance >= 20) {
-    lines.push("🏔️ Running this distance is a serious achievement. Most people never attempt distances like this. Your marathon preparation is on track.");
-  } else if (run.type === 'interval') {
-    lines.push("💪 Hard sessions like this are rare and valuable. Recovery is part of the session — prioritise sleep and nutrition tonight.");
-  } else if (run.type === 'tempo') {
-    lines.push("🔥 Tempo runs are the most powerful single training stimulus for marathon improvement. Every one you complete raises your ceiling.");
-  } else {
-    lines.push("👟 Every run logged is a step toward your marathon. Keep the consistency going.");
-  }
-
+  if (totalSecs < run.distance * 240) lines.push("⚠️ Those times look very fast — double-check your entries.");
+  if (run.type === 'long' && run.distance >= 20) lines.push("🏔️ Running this distance while also commute cycling is extraordinary. Your aerobic base is building faster than a run-only plan.");
+  else if (run.type === 'interval') lines.push("💪 Hard sessions on top of commute cycling build exceptional fatigue resistance. Prioritise sleep and nutrition tonight.");
+  else if (run.type === 'tempo') lines.push("🔥 Tempo runs are the most powerful marathon training stimulus. Every one raises your ceiling.");
+  else lines.push("👟 Every run logged — on top of your cycling — is building a remarkably strong aerobic engine.");
   return lines;
 }
 
 // ─── Run Modal ───────────────────────────────────────────────────
 function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFeedback }) {
-  const zone = PACE_ZONES[run.type];
+  const isCycle = ['cycle', 'cycle_hard', 'commute'].includes(run.type);
+  const zone = PACE_ZONES[run.type] || PACE_ZONES['easy'];
   const isRaceDay = run.title.includes("MARATHON DAY");
   const isRest = run.type === "rest";
 
-  const [mode, setMode] = useState('outdoor'); // 'outdoor' | 'treadmill'
-  const detail = getRunDetail(run, weekNum, mode);
+  const [mode, setMode] = useState('outdoor');
+  const detail = isCycle ? getCycleDetail(run) : getRunDetail(run, weekNum, mode);
 
   const [showFeedback, setShowFeedback] = useState(false);
   const [mins, setMins] = useState(feedback?.mins || '');
@@ -146,13 +130,13 @@ function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFee
               {run.distance > 0 && (
                 <div style={{ display:'flex', gap:18, marginTop:10, flexWrap:'wrap' }}>
                   <Stat val={`${run.distance} km`} label="distance" color={zone.color} />
-                  <Stat val={mode === 'treadmill' ? zone.treadmillSpeed : zone.paceRange} label={mode === 'treadmill' ? 'treadmill speed' : 'target pace'} />
+                  <Stat val={isCycle ? zone.paceRange : (mode === 'treadmill' ? zone.treadmillSpeed : zone.paceRange)} label={isCycle ? 'target speed' : (mode === 'treadmill' ? 'treadmill speed' : 'target pace')} />
                   <Stat val={zone.effort} label="effort" />
                   <Stat val={zone.heartRate} label="HR zone" />
                 </div>
               )}
-              {/* Outdoor / Treadmill toggle */}
-              {!isRest && (
+              {/* Outdoor / Treadmill toggle — running only */}
+              {!isRest && !isCycle && (
                 <div style={{ display:'flex', gap:6, marginTop:14 }}>
                   {[['outdoor','🏃 Outdoor'],['treadmill','🎢 Treadmill']].map(([m, label]) => (
                     <button key={m} onClick={() => setMode(m)} style={{
@@ -220,14 +204,14 @@ function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFee
                 border:'none', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center',
               }}>
                 <span style={{ fontSize:13, fontWeight:700, color: saved ? '#4CAF7D' : '#FFF' }}>
-                  {saved ? '✓ Feedback logged' : '📝 Log Your Run'}
+                  {saved ? `✓ Feedback logged` : `📝 Log Your ${isCycle ? 'Ride' : 'Run'}`}
                 </span>
                 <span style={{ color:'#6B6B80', fontSize:14, transform: showFeedback ? 'rotate(180deg)' : 'none', transition:'transform .2s' }}>▾</span>
               </button>
 
               {showFeedback && (
                 <div style={{ padding:'16px 18px 18px', background:'#13131C', borderTop:'1px solid #2A2A3C', display:'flex', flexDirection:'column', gap:14 }}>
-                  <p style={{ margin:0, fontSize:12, color:'#6B7280' }}>Enter your actual run data and get personalised coaching feedback.</p>
+                  <p style={{ margin:0, fontSize:12, color:'#6B7280' }}>Enter your actual {isCycle ? 'ride' : 'run'} data and get personalised coaching feedback.</p>
 
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                     <InputGroup label="Total Time">
@@ -236,19 +220,19 @@ function RunModal({ run, weekNum, onClose, isDone, onToggle, feedback, onSaveFee
                         <NumberInput value={secs} onChange={setSecs} placeholder="sec" max={59} />
                       </div>
                     </InputGroup>
-                    <InputGroup label="Avg Pace / km">
+                    <InputGroup label={isCycle ? "Avg Speed (km/h)" : "Avg Pace / km"}>
                       <div style={{ display:'flex', gap:6 }}>
-                        <NumberInput value={paceMin} onChange={setPaceMin} placeholder="min" max={30} />
-                        <NumberInput value={paceSec} onChange={setPaceSec} placeholder="sec" max={59} />
+                        <NumberInput value={paceMin} onChange={setPaceMin} placeholder={isCycle ? "km/h" : "min"} max={isCycle ? 60 : 30} />
+                        {!isCycle && <NumberInput value={paceSec} onChange={setPaceSec} placeholder="sec" max={59} />}
                       </div>
                     </InputGroup>
                   </div>
 
-                  <InputGroup label="How did it feel? (optional)">
+                  <InputGroup label={`How did it feel? (optional)`}>
                     <textarea
                       value={notes}
                       onChange={e => setNotes(e.target.value)}
-                      placeholder="e.g. Legs felt heavy but pushed through the intervals..."
+                      placeholder={isCycle ? "e.g. Legs felt strong, traffic was light..." : "e.g. Legs felt heavy but pushed through the intervals..."}
                       rows={2}
                       style={{ width:'100%', background:'#1E1E2E', border:'1px solid #2A2A3C', borderRadius:8, padding:'8px 10px', color:'#FFF', fontSize:13, fontFamily:'inherit', outline:'none' }}
                     />
@@ -351,23 +335,29 @@ function NumberInput({ value, onChange, placeholder, max }) {
 
 // ─── Progress Summary ─────────────────────────────────────────────
 function ProgressSummary({ completedRuns }) {
-  const totalRuns = PLAN.reduce((s, w) => s + w.runs.filter(r => r.type !== 'rest').length, 0);
-  const doneRuns = Object.values(completedRuns).filter(Boolean).length;
-  const totalKm = PLAN.reduce((s, w) => s + w.runs.reduce((a, r) => a + r.distance, 0), 0);
-  const doneKm = PLAN.reduce((total, w) =>
-    total + w.runs.reduce((s, r, i) => s + (completedRuns[`${w.week}-${i}`] ? r.distance : 0), 0), 0);
-
+  const cycleTypes = ['cycle', 'cycle_hard', 'commute'];
   const completedWeeks = PLAN.filter(w => w.runs.every((_, i) => completedRuns[`${w.week}-${i}`])).length;
 
+  const doneRunKm = PLAN.reduce((total, w) =>
+    total + w.runs.reduce((s, r, i) =>
+      s + (completedRuns[`${w.week}-${i}`] && !cycleTypes.includes(r.type) ? r.distance : 0), 0), 0);
+
+  const doneCycleKm = PLAN.reduce((total, w) =>
+    total + w.runs.reduce((s, r, i) =>
+      s + (completedRuns[`${w.week}-${i}`] && cycleTypes.includes(r.type) ? r.distance : 0), 0), 0);
+
+  const totalActivities = PLAN.reduce((s, w) => s + w.runs.filter(r => r.type !== 'rest').length, 0);
+  const doneActivities = Object.values(completedRuns).filter(Boolean).length;
+
   return (
-    <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+    <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
       {[
         { val: `${completedWeeks}/20`, label:'Weeks Done', color:'#818CF8' },
-        { val: `${doneRuns}/${totalRuns}`, label:'Runs Done', color:'#4CAF7D' },
-        { val: `${Math.round(doneKm)}/${Math.round(totalKm)} km`, label:'KM Logged', color:'#F59E0B' },
+        { val: `${Math.round(doneRunKm)} km`, label:'🏃 Run KM', color:'#4CAF7D' },
+        { val: `${Math.round(doneCycleKm)} km`, label:'🚲 Cycle KM', color:'#06B6D4' },
       ].map(s => (
-        <div key={s.label} style={{ background:'#1A1A26', border:'1px solid #2A2A3C', borderRadius:10, padding:'10px 14px', flex:1, minWidth:90 }}>
-          <div style={{ fontSize:16, fontWeight:800, color:s.color }}>{s.val}</div>
+        <div key={s.label} style={{ background:'#1A1A26', border:'1px solid #2A2A3C', borderRadius:10, padding:'10px 14px', flex:1, minWidth:80 }}>
+          <div style={{ fontSize:15, fontWeight:800, color:s.color }}>{s.val}</div>
           <div style={{ fontSize:10, color:'#6B7280', marginTop:1 }}>{s.label}</div>
         </div>
       ))}
@@ -397,20 +387,21 @@ export default function App() {
   const week = PLAN[selectedWeek - 1];
   const phaseColor = PHASE_COLORS[week.phase] || '#818CF8';
   const totalKm = week.runs.reduce((s, r) => s + r.distance, 0);
+  const runCount = week.runs.length;
   const completedThisWeek = week.runs.filter((_, i) => completedRuns[`${selectedWeek}-${i}`]).length;
-  const isWeekComplete = completedThisWeek === 4;
+  const isWeekComplete = completedThisWeek === runCount;
 
-  // Auto-advance: when a week is just completed, move to next
+  // Auto-advance when all activities in week are complete
   const prevCompleted = useRef(completedThisWeek);
   useEffect(() => {
-    if (prevCompleted.current !== 4 && completedThisWeek === 4 && selectedWeek < 20) {
+    if (prevCompleted.current !== runCount && completedThisWeek === runCount && selectedWeek < 20) {
       const timer = setTimeout(() => {
         setSelectedWeek(selectedWeek + 1);
       }, 1200);
       return () => clearTimeout(timer);
     }
     prevCompleted.current = completedThisWeek;
-  }, [completedThisWeek]);
+  }, [completedThisWeek, runCount]);
 
   const toggleComplete = (weekNum, dayIndex) => {
     const key = `${weekNum}-${dayIndex}`;
@@ -444,9 +435,9 @@ export default function App() {
       <div style={{ background:'linear-gradient(160deg, #13131E 0%, #0C0C14 100%)', borderBottom:'1px solid #1E1E2C', padding:'20px 20px 16px' }}>
         <div style={{ maxWidth:620, margin:'0 auto' }}>
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
-            <span style={{ fontSize:28 }}>🏃</span>
+            <span style={{ fontSize:26 }}>🏃🚲</span>
             <div>
-              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.16em', color:'#818CF8', textTransform:'uppercase' }}>Aakash's Marathon Plan</div>
+              <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.16em', color:'#818CF8', textTransform:'uppercase' }}>Aakash's Run & Ride Plan</div>
               <h1 style={{ margin:0, fontSize:20, fontWeight:900, color:'#FFF', letterSpacing:'-0.02em' }}>20 Weeks to 42.2 KM</h1>
             </div>
           </div>
@@ -530,16 +521,16 @@ export default function App() {
               <div style={{ display:'flex', gap:14 }}>
                 <div style={{ textAlign:'right' }}>
                   <div style={{ fontSize:19, fontWeight:800, color:phaseColor }}>{totalKm} <span style={{ fontSize:11, color:'#6B7280' }}>km</span></div>
-                  <div style={{ fontSize:10, color:'#6B7280' }}>weekly volume</div>
+                  <div style={{ fontSize:10, color:'#6B7280' }}>total volume</div>
                 </div>
                 <div style={{ textAlign:'right' }}>
-                  <div style={{ fontSize:19, fontWeight:800, color: isWeekComplete ? '#4CAF7D' : '#FFF' }}>{completedThisWeek}<span style={{ fontSize:12, color:'#6B7280' }}>/4</span></div>
-                  <div style={{ fontSize:10, color:'#6B7280' }}>runs done</div>
+                  <div style={{ fontSize:19, fontWeight:800, color: isWeekComplete ? '#4CAF7D' : '#FFF' }}>{completedThisWeek}<span style={{ fontSize:12, color:'#6B7280' }}>/{runCount}</span></div>
+                  <div style={{ fontSize:10, color:'#6B7280' }}>done</div>
                 </div>
               </div>
             </div>
             <div style={{ marginTop:10, background:'#1E1E2C', borderRadius:6, height:4, overflow:'hidden' }}>
-              <div style={{ width:`${(completedThisWeek/4)*100}%`, height:'100%', borderRadius:6, background: isWeekComplete ? '#4CAF7D' : phaseColor, transition:'width .5s ease' }} />
+              <div style={{ width:`${(completedThisWeek/runCount)*100}%`, height:'100%', borderRadius:6, background: isWeekComplete ? '#4CAF7D' : phaseColor, transition:'width .5s ease' }} />
             </div>
             {isWeekComplete && selectedWeek < 20 && (
               <div style={{ marginTop:10, background:'#0E1F16', border:'1px solid #4CAF7D44', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#4CAF7D', fontWeight:600 }}>
@@ -553,19 +544,20 @@ export default function App() {
             )}
           </div>
 
-          <div style={{ fontSize:11, color:'#6B7280', textAlign:'center', marginBottom:12 }}>Tap any run for full workout details & feedback</div>
+          <div style={{ fontSize:11, color:'#6B7280', textAlign:'center', marginBottom:12 }}>Tap any session for full details & feedback</div>
 
-          {/* Run cards */}
+          {/* Activity cards */}
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {week.runs.map((run, i) => {
-              const zone = PACE_ZONES[run.type];
+              const isCycleCard = ['cycle', 'cycle_hard', 'commute'].includes(run.type);
+              const zone = PACE_ZONES[run.type] || PACE_ZONES['easy'];
               const done = completedRuns[`${selectedWeek}-${i}`];
               const hasFb = !!feedbacks[`${selectedWeek}-${i}`];
               const isRaceDay = run.title.includes('MARATHON DAY');
               return (
                 <div key={i} onClick={() => openModal(run, i)} style={{
-                  background: done ? '#0E1A12' : '#13131E',
-                  border: `1px solid ${done ? '#4CAF7D33' : isRaceDay ? '#EC489966' : '#1E1E2C'}`,
+                  background: done ? (isCycleCard ? '#041618' : '#0E1A12') : '#13131E',
+                  border: `1px solid ${done ? `${zone.color}44` : isRaceDay ? '#EC489966' : '#1E1E2C'}`,
                   borderRadius:13, padding:'13px 15px', cursor:'pointer',
                   transition:'all .15s', opacity: done && !isRaceDay ? 0.82 : 1,
                 }}>
@@ -573,7 +565,9 @@ export default function App() {
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, flexWrap:'wrap' }}>
                         <Tag bg="#1A1A26" color="#6B7280">{run.day}</Tag>
-                        <Tag bg={zone.bg} color={zone.color} border={zone.border}>{zone.label}</Tag>
+                        <Tag bg={zone.bg} color={zone.color} border={zone.border}>
+                          {isCycleCard ? '🚲 ' : ''}{zone.label}
+                        </Tag>
                         {isRaceDay && <Tag bg="#EC489920" color="#EC4899">RACE DAY</Tag>}
                         {done && <Tag bg="#4CAF7D18" color="#4CAF7D">✓ Done</Tag>}
                         {hasFb && !done && <Tag bg="#818CF818" color="#818CF8">📝 Logged</Tag>}
@@ -581,7 +575,9 @@ export default function App() {
                       </div>
                       <div style={{ fontSize:15, fontWeight:700, color:'#FFF', marginBottom:2 }}>{run.title}</div>
                       <div style={{ fontSize:12, color:'#6B7280' }}>
-                        {run.distance > 0 ? `${run.distance} km · ${zone.paceRange}` : 'Full rest day'}
+                        {run.distance > 0
+                          ? `${run.distance} km · ${isCycleCard ? zone.paceRange + ' avg' : zone.paceRange}`
+                          : 'Full rest day'}
                       </div>
                     </div>
                     <span style={{ color:'#2E2E3E', fontSize:20, marginLeft:10 }}>›</span>
